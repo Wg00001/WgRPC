@@ -2,48 +2,45 @@ package main
 
 import (
 	"WgRPC"
-	"WgRPC/codec"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
 func startServer(addr chan string) {
-	//检测一手
+	// pick a free port
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
-		log.Fatal("main.startServer: network ERR: ", err)
+		log.Fatal("network error:", err)
 	}
+	log.Println("start rpc server on", l.Addr())
 	addr <- l.Addr().String()
 	wgRPC.Accept(l)
-	log.Println("start rpc server on ", l.Addr())
 }
-
 func main() {
+	log.SetFlags(0)
 	addr := make(chan string)
 	go startServer(addr)
-
-	conn, _ := net.Dial("tcp", <-addr)
-	defer conn.Close()
+	client, _ := wgRPC.Dial("tcp", <-addr)
+	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)
-	//发送Option进行协议交换
-	json.NewEncoder(conn).Encode(wgRPC.DefaultOption)
-	c := codec.NewGobCodec(conn)
+	// send request & receive response
+	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
-		//发送消息头
-		h := &codec.Header{
-			ServiceMethod: "Foo.Sum",
-			Seq:           uint64(i),
-		}
-		//发送消息体
-		c.Write(h, fmt.Sprintf("geerpc req %d", h.Seq))
-		c.ReadHeader(h)
-		//解析响应并答应
-		var reply string
-		c.ReadBody(&reply)
-		log.Println("reply:", reply)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			args := fmt.Sprintf("geerpc req %d", i)
+			var reply string
+			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+				log.Fatal("call Foo.Sum error:", err)
+			}
+			log.Println("reply:", reply)
+		}(i)
+
 	}
+	wg.Wait()
 }

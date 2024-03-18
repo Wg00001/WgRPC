@@ -134,7 +134,7 @@ func (server *Server) readRequest(c codec.Codec) (*request, error) {
 	return req, nil
 }
 
-// 发送请求
+// 发送响应
 func (server *Server) sendResponse(c codec.Codec, header *codec.Header, body interface{}, sending *sync.Mutex) {
 	sending.Lock()
 	defer sending.Unlock()
