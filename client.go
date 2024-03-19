@@ -2,6 +2,7 @@ package wgRPC
 
 import (
 	"WgRPC/codec"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 type Call struct {
@@ -36,6 +38,14 @@ type Client struct {
 	closing  bool             //用户决定停止
 	shutdown bool             //服务器通知停止
 }
+
+// 用于超时处理功能
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+//type newClientFunc func(conn net.Conn, option *Option) (client *Client, err error)
 
 var _ io.Closer = (*Client)(nil)
 
@@ -156,16 +166,34 @@ func Dial(network, address string, options ...*Option) (client *Client, err erro
 	if err != nil {
 		return nil, err
 	}
-	conn, err := net.Dial(network, address)
+	//用net.DialTimeout防止超时（传入设置的时间）
+	conn, err := net.DialTimeout(network, address, option.ConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if client == nil {
+		if err != nil {
 			conn.Close()
 		}
 	}()
-	return NewClient(conn, option)
+	ch := make(chan clientResult)
+	go func() {
+		client, err := NewClient(conn, option)
+		ch <- clientResult{
+			client: client,
+			err:    err,
+		}
+	}()
+	if option.ConnectTimeout == 0 {
+		result := <-ch
+		return result.client, result.err
+	}
+	select {
+	case <-time.After(option.ConnectTimeout):
+		return nil, fmt.Errorf("client.Dial: connect timeout: expect within %s", option.ConnectTimeout)
+	case result := <-ch:
+		return result.client, result.err
+	}
 }
 
 // 解析option
@@ -226,7 +254,24 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 }
 
 // Call 对Go的封装，是一个同步接口：阻塞call.Done，等待响应返回协程调用go
-func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
-	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+func (client *Client) Call(serviceMethod string, args, reply interface{}, ctx ...context.Context) error {
+	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
+	//用context包实现超时处理，控制权交给用户
+	c := *new(context.Context)
+	if len(ctx) != 0 {
+		if len(ctx) != 1 {
+			log.Println("WARING:client.call: Only the first context(time) will take effect")
+		}
+		c = ctx[0]
+	} else {
+		//默认为一秒，可以设置
+		c, _ = context.WithTimeout(context.Background(), time.Second)
+	}
+	select {
+	case <-c.Done():
+		client.removeCall(call.Seq)
+		return errors.New("client.Call: call failed: " + c.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }

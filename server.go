@@ -4,6 +4,7 @@ import (
 	"WgRPC/codec"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -59,6 +60,7 @@ func (server *Server) Accept(listner net.Listener) {
 	}
 }
 
+// ServeConn 连接服务器
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 	defer conn.Close()
 	var opt Option
@@ -79,13 +81,13 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Printf("server.ServeConn: invalid codec type ERR: %s \n", opt.CodecType)
 		return
 	}
-	server.serveCodec(f(conn))
+	server.serveCodec(f(conn), &opt)
 }
 
 // 如果发生错误则发送这个空body给客户端
 var invalidRequest = struct{}{}
 
-func (server *Server) serveCodec(codec codec.Codec) {
+func (server *Server) serveCodec(codec codec.Codec, opt *Option) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup) //等待所有请求被处理完，
 	//循环直到发生错误，这使得一次链接可以接收多个请求
@@ -104,7 +106,7 @@ func (server *Server) serveCodec(codec codec.Codec) {
 		}
 		wg.Add(1)
 		//处理请求
-		go server.handleRequest(codec, req, sending, wg)
+		go server.handleRequest(codec, req, sending, wg, opt.HandleTimeout)
 	}
 	wg.Wait()
 	codec.Close()
@@ -150,7 +152,7 @@ type request struct {
 	header       *codec.Header
 	argv, replyV reflect.Value //反射获得类型
 	mtype        *methodType
-	svc          *service
+	svc          *service //服务注册
 }
 
 // 读取请求头
@@ -206,14 +208,34 @@ func (server *Server) sendResponse(c codec.Codec, header *codec.Header, body int
 }
 
 // 处理请求
-func (server *Server) handleRequest(c codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(c codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup, timeout time.Duration) {
 	defer wg.Done()
-	err := req.svc.call(req.mtype, req.argv, req.replyV)
-	if err != nil {
-		req.header.Error = err.Error()
-		server.sendResponse(c, req.header, invalidRequest, sending)
+	//将过程拆为call和sent两个阶段，以确保sendResponse仅调用一次
+	called := make(chan struct{})
+	sent := make(chan struct{})
+	go func() {
+		err := req.svc.call(req.mtype, req.argv, req.replyV)
+		called <- struct{}{}
+		if err != nil {
+			req.header.Error = err.Error()
+			server.sendResponse(c, req.header, invalidRequest, sending)
+			sent <- struct{}{}
+			return
+		}
+		server.sendResponse(c, req.header, req.replyV.Interface(), sending)
+		sent <- struct{}{}
+	}()
+	if timeout == 0 {
+		<-called
+		<-sent
 		return
 	}
-	//将replyv传给sendResponse完成反序列化
-	server.sendResponse(c, req.header, req.replyV.Interface(), sending)
+	select {
+	//处理超时，则阻塞called和sent，调用sendResponse
+	case <-time.After(timeout):
+		req.header.Error = fmt.Sprintf("server.handleRequest: request handle timeout: expect within %s", timeout)
+		server.sendResponse(c, req.header, invalidRequest, sending)
+	case <-called:
+		<-sent
+	}
 }
