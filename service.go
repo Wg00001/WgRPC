@@ -19,6 +19,7 @@ import (
 借助反射来使映射过程自动化，获取某个结构体的所有方法，获取该方法的所有参数类型和返回值
 */
 
+// 方法类型
 type methodType struct {
 	method    reflect.Method //方法本身
 	ArgType   reflect.Type   //方法的第一个参数的类型
@@ -26,6 +27,7 @@ type methodType struct {
 	numCalls  uint64         //用于统计方法调用次数
 }
 
+// NumCalls 原子获取调用次数
 func (m *methodType) NumCalls() uint64 {
 	return atomic.LoadUint64(&m.numCalls)
 }
@@ -60,11 +62,13 @@ type service struct {
 	method map[string]*methodType //存储映射的结构体的所有符合条件的方法。
 }
 
+// 根据要映射的结构体来创建service
 func newService(rcvr interface{}) *service {
 	s := new(service)
 	s.rcvr = reflect.ValueOf(rcvr)
 	s.name = reflect.Indirect(s.rcvr).Type().Name()
 	s.typ = reflect.TypeOf(rcvr)
+	//判断结构体是否外部可见
 	if !ast.IsExported(s.name) {
 		log.Fatalf("service.newService: %s is not a valid service name", s.name)
 	}
@@ -72,4 +76,46 @@ func newService(rcvr interface{}) *service {
 	return s
 }
 
-func (s *service) registerMethods() {}
+// 过滤出符合条件的方法，放入service.method里
+func (service *service) registerMethods() {
+	service.method = make(map[string]*methodType)
+	//遍历该结构体的所有方法
+	for i := 0; i < service.typ.NumMethod(); i++ {
+		method := service.typ.Method(i)
+		mType := method.Type
+		//判断入参是否等于3
+		if mType.NumIn() != 3 || mType.NumOut() != 1 {
+			continue
+		}
+		if mType.Out(0) != reflect.TypeOf((*error)(nil)).Elem() {
+			continue
+		}
+		//0是它自身（即this），1是第一个参数，2是第二个参数
+		argType, replyType := mType.In(1), mType.In(2)
+		if !isExportedOrBuiltinType(argType) || !isExportedOrBuiltinType(replyType) {
+			continue
+		}
+		//放入service.method中
+		service.method[method.Name] = &methodType{
+			method:    method,
+			ArgType:   argType,
+			ReplyType: replyType,
+		}
+		log.Printf("rpc server: register %s.%s\n", service.name, method.Name)
+	}
+}
+
+func isExportedOrBuiltinType(t reflect.Type) bool {
+	return ast.IsExported(t.Name()) || t.PkgPath() == ""
+}
+
+// 通过反射值调用方法
+func (service *service) call(m *methodType, argv, replyv reflect.Value) error {
+	atomic.AddUint64(&m.numCalls, 1)
+	f := m.method.Func
+	returnValues := f.Call([]reflect.Value{service.rcvr, argv, replyv})
+	if errInter := returnValues[0].Interface(); errInter != nil {
+		return errInter.(error)
+	}
+	return nil
+}
