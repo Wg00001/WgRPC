@@ -8,13 +8,19 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 )
 
-const MagicNumber = 0x03719666 //检验用的神奇妙妙数字
+const (
+	MagicNumber      = 0x03719666 //检验用的神奇妙妙数字
+	connected        = "200 Connected to WgRPC"
+	defaultRPCPath   = "/wgrpc"
+	defaultDebugPath = "/debug/wgrpc"
+)
 
 /**
 本客户端采用JSON编码的Option，后续header和body的编码方式由Option中的CodeType指定
@@ -238,4 +244,35 @@ func (server *Server) handleRequest(c codec.Codec, req *request, sending *sync.M
 	case <-called:
 		<-sent
 	}
+}
+
+/**
+支持HTTP协议
+客户端向RPC服务器发送CONNECT请求，RPC应该返回HTTP200状态码表示连接建立
+客户端用创建好的连接发送RPC报文，先发送Option，再发送N个请求报文，服务端处理RPC请求并响应
+*/
+
+// 实现一个http.Handler将requests发送给RPC
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("server.serveHTTP: hijacking ERR: ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	io.WriteString(conn, "HTTP/1.0"+connected+"\n\n")
+	server.ServeConn(conn)
+}
+
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }
