@@ -2,6 +2,7 @@ package wgRPC
 
 import (
 	"WgRPC/codec"
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,13 +48,13 @@ type clientResult struct {
 	err    error
 }
 
-//type newClientFunc func(conn net.Conn, option *Option) (client *Client, err error)
+type newClientFunc func(conn net.Conn, option *Option) (client *Client, err error)
 
 var _ io.Closer = (*Client)(nil)
 
 var ErrShutdown = errors.New("connection is shut down")
 
-// 关闭连接
+// Close 关闭连接
 func (client *Client) Close() error {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
@@ -62,7 +65,7 @@ func (client *Client) Close() error {
 	return client.c.Close()
 }
 
-// 判断是否还在工作(是则返回True)
+// IsAvailable 判断是否还在工作(是则返回True)
 func (client *Client) IsAvailable() bool {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
@@ -160,7 +163,11 @@ func NewClient(conn net.Conn, option *Option) (*Client, error) {
 
 // Dial 便于用户传入服务端地址
 // 通过...*Option将Option实现为可选参数
-func Dial(network, address string, options ...*Option) (client *Client, err error) {
+func Dial(network, address string, options ...*Option) (*Client, error) {
+	return dialTimeout(NewClient, network, address, options...)
+}
+
+func dialTimeout(newClient newClientFunc, network, address string, options ...*Option) (client *Client, err error) {
 	//解析option
 	option, err := parseOptions(options...)
 	if err != nil {
@@ -178,7 +185,7 @@ func Dial(network, address string, options ...*Option) (client *Client, err erro
 	}()
 	ch := make(chan clientResult)
 	go func() {
-		client, err := NewClient(conn, option)
+		client, err := newClient(conn, option)
 		ch <- clientResult{
 			client: client,
 			err:    err,
@@ -216,6 +223,7 @@ func parseOptions(options ...*Option) (*Option, error) {
 func (client *Client) send(call *Call) {
 	client.sending.Lock()
 	defer client.sending.Unlock()
+	//注册这个call
 	seq, err := client.registerCall(call)
 	if err != nil {
 		call.Error = err
@@ -264,8 +272,9 @@ func (client *Client) Call(serviceMethod string, args, reply interface{}, ctx ..
 		}
 		c = ctx[0]
 	} else {
-		//默认为一秒，可以设置
+		//默认
 		c, _ = context.WithTimeout(context.Background(), time.Second)
+		//c = context.Background()
 	}
 	select {
 	case <-c.Done():
@@ -273,5 +282,45 @@ func (client *Client) Call(serviceMethod string, args, reply interface{}, ctx ..
 		return errors.New("client.Call: call failed: " + c.Err().Error())
 	case call := <-call.Done:
 		return call.Error
+	}
+}
+
+/**
+客户端支持HTTP协议
+向服务端发起CONNECT请求，检查返回的状态码
+*/
+
+func NewHTTPClient(conn net.Conn, option *Option) (*Client, error) {
+	io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	//连接上了的话创建新客户端
+	if err == nil && resp.Status == connected {
+		return NewClient(conn, option)
+	}
+	if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	return nil, err
+}
+
+// DialHTTP 通过HTTP CONNECT请求建立连接，连接上HTTP RPC服务器
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+	return dialTimeout(NewHTTPClient, network, address, opts...)
+}
+
+// XDial 使用不同的方法去连接RPC server
+func XDial(rpcAddr string, opts ...*Option) (*Client, error) {
+	//根据rpcAddr
+	parts := strings.Split(rpcAddr, "@")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("client.XDial: client ERR: wrong format '%s', expect protocol@addr", rpcAddr)
+	}
+	protocol, addr := parts[0], parts[1]
+	switch protocol {
+	case "http":
+		return DialHTTP("tcp", addr, opts...)
+	default:
+		//tcp、unix或其他传输协议
+		return Dial(protocol, addr, opts...)
 	}
 }

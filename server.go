@@ -17,7 +17,7 @@ import (
 
 const (
 	MagicNumber      = 0x03719666 //检验用的神奇妙妙数字
-	connected        = "200 Connected to WgRPC"
+	connected        = "200 Connected to Wg RPC"
 	defaultRPCPath   = "/wgrpc"
 	defaultDebugPath = "/debug/wgrpc"
 )
@@ -80,7 +80,6 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Printf("server.ServeConn: magic number ERR:%x \n", opt.MagicNumber)
 		return
 	}
-
 	//创建map并验证数据类型
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
@@ -252,6 +251,17 @@ func (server *Server) handleRequest(c codec.Codec, req *request, sending *sync.M
 客户端用创建好的连接发送RPC报文，先发送Option，再发送N个请求报文，服务端处理RPC请求并响应
 */
 
+// 绑定地址
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+	http.Handle(defaultDebugPath, debugHTTP{server})
+	log.Println("server.HandleHTTP: server debug path: ", defaultDebugPath)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
+}
+
 // 实现一个http.Handler将requests发送给RPC
 func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Method != "CONNECT" {
@@ -265,14 +275,6 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		log.Print("server.serveHTTP: hijacking ERR: ", req.RemoteAddr, ": ", err.Error())
 		return
 	}
-	io.WriteString(conn, "HTTP/1.0"+connected+"\n\n")
+	io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
 	server.ServeConn(conn)
-}
-
-func (server *Server) HandleHTTP() {
-	http.Handle(defaultRPCPath, server)
-}
-
-func HandleHTTP() {
-	DefaultServer.HandleHTTP()
 }
