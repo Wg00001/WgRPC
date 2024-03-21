@@ -31,6 +31,7 @@ type MultiServerDiscovery struct {
 	index   int //用于记录Robin算法的选定位置
 }
 
+// NewMultiServerDiscovery 构造函数
 func NewMultiServerDiscovery(servers []string) *MultiServerDiscovery {
 	m := &MultiServerDiscovery{
 		servers: servers,
