@@ -156,6 +156,7 @@ func NewClient(conn net.Conn, option *Option) (*Client, error) {
 		seq:     1,
 		pending: make(map[uint64]*Call),
 	}
+
 	//创建协程调用receive()接收响应
 	go client.receive()
 	return client, nil
@@ -268,7 +269,7 @@ func (client *Client) Call(serviceMethod string, args, reply interface{}, ctx ..
 	c := *new(context.Context)
 	if len(ctx) != 0 {
 		if len(ctx) != 1 {
-			log.Println("WARING:client.call: Only the first context(time) will take effect")
+			log.Println("WARING:client.call: Only the first context will take effect")
 		}
 		c = ctx[0]
 	} else {

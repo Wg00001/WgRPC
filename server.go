@@ -28,9 +28,9 @@ const (
 */
 
 type Option struct {
-	MagicNumber    int
+	MagicNumber    int32
 	CodecType      codec.Type
-	ConnectTimeout time.Duration //time.Duration用于表示持续时间
+	ConnectTimeout time.Duration //time.Duration用于表示持续时间`
 	HandleTimeout  time.Duration
 }
 
@@ -96,7 +96,6 @@ func (server *Server) serveCodec(codec codec.Codec, opt *Option) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup) //等待所有请求被处理完，
 	//循环直到发生错误，这使得一次链接可以接收多个请求
-	//todo：超时断联
 	for {
 		//读取请求
 		req, err := server.readRequest(codec)
@@ -165,7 +164,7 @@ func (server *Server) readRequestHeader(c codec.Codec) (*codec.Header, error) {
 	var header codec.Header
 	if err := c.ReadHeader(&header); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			log.Println("server.readRequest: read header ERR:", err)
+			log.Println("server.readRequestHeader: read header ERR:", err)
 		}
 		return nil, err
 	}
