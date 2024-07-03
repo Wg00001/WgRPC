@@ -263,24 +263,13 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 }
 
 // Call 对Go的封装，是一个同步接口：阻塞call.Done，等待响应返回协程调用go
-func (client *Client) Call(serviceMethod string, args, reply interface{}, ctx ...context.Context) error {
+func (client *Client) Call(ctx context.Context, serviceMethod string, args, reply interface{}) error {
 	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
 	//用context包实现超时处理，控制权交给用户
-	c := *new(context.Context)
-	if len(ctx) != 0 {
-		if len(ctx) != 1 {
-			log.Println("WARING:client.call: Only the first context will take effect")
-		}
-		c = ctx[0]
-	} else {
-		//默认
-		c, _ = context.WithTimeout(context.Background(), time.Second)
-		//c = context.Background()
-	}
 	select {
-	case <-c.Done():
+	case <-ctx.Done():
 		client.removeCall(call.Seq)
-		return errors.New("client.Call: call failed: " + c.Err().Error())
+		return errors.New("client.Call: call failed: " + ctx.Err().Error())
 	case call := <-call.Done:
 		return call.Error
 	}

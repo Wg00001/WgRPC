@@ -1,4 +1,4 @@
-package xclient
+package loadBalancer
 
 import (
 	"errors"
@@ -63,7 +63,7 @@ func (m *MultiServerDiscovery) Get(mode SelectMode) (string, error) {
 	defer m.mutex.Unlock()
 	n := len(m.servers)
 	if n == 0 {
-		return "", errors.New("ERR:xclient.discovery.MultiServerDiscovery.Get: no available servers")
+		return "", errors.New("ERR:loadBalancer.discovery.MultiServerDiscovery.Get: no available servers")
 	}
 	switch mode {
 	case RandomSelect:
@@ -73,7 +73,7 @@ func (m *MultiServerDiscovery) Get(mode SelectMode) (string, error) {
 		m.index = (m.index + 1) % n
 		return s, nil
 	default:
-		return "", errors.New("ERR:xclient.discovery.MultiServerDiscovery.Get: not supported select mode")
+		return "", errors.New("ERR:loadBalancer.discovery.MultiServerDiscovery.Get: not supported select mode")
 	}
 }
 

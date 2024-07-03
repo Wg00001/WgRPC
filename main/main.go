@@ -2,8 +2,8 @@ package main
 
 import (
 	wgRPC "WgRPC"
+	"WgRPC/loadBalancer"
 	"WgRPC/registry"
-	"WgRPC/xclient"
 	"bytes"
 	"context"
 	"encoding/gob"
@@ -27,14 +27,14 @@ func (f Foo) Sub(args Args, reply *int) error {
 	*reply = args.Num1 - args.Num2
 	return nil
 }
-func foo(xc *xclient.XClient, ctx context.Context, typ, serviceMethod string, args *Args) {
+func foo(xc *loadBalancer.XClient, ctx context.Context, typ, serviceMethod string, args *Args) {
 	var reply int
 	var err error
 	switch typ {
 	case "call":
-		err = xc.Call(serviceMethod, args, &reply, ctx)
+		err = xc.Call(ctx, serviceMethod, args, &reply)
 	case "broadcast":
-		err = xc.Broadcast(serviceMethod, args, &reply, ctx)
+		err = xc.Broadcast(ctx, serviceMethod, args, &reply)
 	}
 	if err != nil {
 		log.Printf("%s %s error: %v", typ, serviceMethod, err)
@@ -62,8 +62,8 @@ func startServer(registryAddr string, wg *sync.WaitGroup) {
 	server.Accept(l)
 }
 func call(registry string) {
-	d := xclient.NewWgRegistryDiscovery(registry, 0)
-	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
+	d := loadBalancer.NewWgRegistryDiscovery(registry, 0)
+	xc := loadBalancer.NewXClient(d, loadBalancer.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	// send request & receive response
 	var wg sync.WaitGroup
@@ -78,8 +78,8 @@ func call(registry string) {
 }
 
 func broadcast(registry string) {
-	d := xclient.NewWgRegistryDiscovery(registry, 0)
-	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
+	d := loadBalancer.NewWgRegistryDiscovery(registry, 0)
+	xc := loadBalancer.NewXClient(d, loadBalancer.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {

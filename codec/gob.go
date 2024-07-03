@@ -14,17 +14,11 @@ type GobCodec struct {
 	enc  *gob.Encoder       //encoder
 }
 
-func (g *GobCodec) Close() error {
-	return g.conn.Close()
-}
+func (g *GobCodec) Close() error { return g.conn.Close() }
 
-func (g *GobCodec) ReadHeader(header *Header) error {
-	return g.dec.Decode(header)
-}
+func (g *GobCodec) ReadHeader(header *Header) error { return g.dec.Decode(header) }
 
-func (g *GobCodec) ReadBody(body interface{}) error {
-	return g.dec.Decode(body)
-}
+func (g *GobCodec) ReadBody(body interface{}) error { return g.dec.Decode(body) }
 
 func (g *GobCodec) Write(header *Header, body interface{}) (err error) {
 	defer func() {
