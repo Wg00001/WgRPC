@@ -3,8 +3,6 @@ package registry
 import (
 	"log"
 	"net/http"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -17,16 +15,12 @@ import (
 3.客户端根据注册中心得到的服务列表，选择其中一个发起调用
 */
 
-type ServerItem struct {
-	Addr  string
-	start time.Time
-}
-
 // WgRegistry 注册中心，提供关注的功能
 type WgRegistry struct {
-	timeout time.Duration
-	mutex   sync.Mutex
-	servers map[string]*ServerItem //服务器
+	timeout  time.Duration
+	mutex    sync.Mutex
+	servers  map[string]*ServerMap //服务名:服务map
+	replicas int
 }
 
 const (
@@ -34,58 +28,53 @@ const (
 	defaultTimeout = time.Minute * 5
 )
 
-func NewWgRegistry(timeout time.Duration) *WgRegistry {
+func NewWgRegistry(timeout time.Duration, replicas int) *WgRegistry {
 	return &WgRegistry{
-		servers: make(map[string]*ServerItem),
-		timeout: timeout,
+		servers:  make(map[string]*ServerMap),
+		timeout:  timeout,
+		replicas: replicas,
 	}
 }
 
-var DefaultWgRegister = NewWgRegistry(defaultTimeout)
+var DefaultWgRegister = NewWgRegistry(defaultTimeout, 3)
 
-// 添加服务实例，若服务存在则更新start
-func (w *WgRegistry) putServer(addr string) {
+// 添加服务实例
+func (w *WgRegistry) putServer(servername, addr string) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	s := w.servers[addr]
-	if s == nil {
-		w.servers[addr] = &ServerItem{
-			Addr:  addr,
-			start: time.Now(),
-		}
-	} else {
-		s.start = time.Now() //存在的话，更新start time
+	if _, ok := w.servers[servername]; !ok {
+		w.servers[servername] = NewServerMap(w.replicas)
 	}
+	w.servers[servername].Add(addr)
 }
 
-// 返回还活着的可用的服务列表，若存在超时的服务则删除
-func (w *WgRegistry) aliveServers() []string {
+// 通过负载均衡策略找出可用实例，发送地址给客户端
+func (w *WgRegistry) aliveServers(servername, remoteAddr string) string {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	var alive []string
-	for addr, s := range w.servers {
-		if w.timeout == 0 || s.start.Add(w.timeout).After(time.Now()) {
-			alive = append(alive, addr)
-		} else {
-			delete(w.servers, addr)
-		}
-	}
-	sort.Strings(alive)
-	return alive
+	return w.servers[servername].Get(remoteAddr)
 }
 
+// 为了更简洁，用HTTP协议提供服务，将所有信息承载于HTTP Header
 func (w *WgRegistry) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	// 为了更简洁，用HTTP协议提供服务，将所有信息承载于HTTP Header
+
 	switch req.Method {
 	case "GET":
-		rw.Header().Set("X-Wgrpc-Servers", strings.Join(w.aliveServers(), ","))
+		rw.Header().Set("X-WgRPC-Server-Addr",
+			w.aliveServers(
+				//请求头中存放需要的服务名，根据请求的ip进行hash
+				req.Header.Get("X-WgRPC-Server-Name"),
+				req.RemoteAddr+req.Header.Get("X-Real-IP"),
+			),
+		)
 	case "POST":
-		addr := req.Header.Get("X-Wgrpc-Server")
+		addr := req.Header.Get("X-WgRPC-Server-Addr")
+		servername := req.Header.Get("X-WgRPC-Server-Name")
 		if addr == "" {
 			rw.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		w.putServer(addr)
+		w.putServer(servername, addr)
 	default:
 		rw.WriteHeader(http.StatusMethodNotAllowed)
 	}
