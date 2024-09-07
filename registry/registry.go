@@ -39,13 +39,18 @@ func NewWgRegistry(timeout time.Duration, replicas int) *WgRegistry {
 var DefaultWgRegister = NewWgRegistry(defaultTimeout, 3)
 
 // 添加服务实例
-func (w *WgRegistry) putServer(servername, addr string) {
+func (w *WgRegistry) putServer(servername, addr string) error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 	if _, ok := w.servers[servername]; !ok {
 		w.servers[servername] = NewServerMap(w.replicas)
+	} else {
+		if err := w.servers[servername].heatBeat(addr); err != nil {
+			return err
+		}
 	}
 	w.servers[servername].Add(addr)
+	return nil
 }
 
 // 通过负载均衡策略找出可用实例，发送地址给客户端

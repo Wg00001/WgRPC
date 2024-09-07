@@ -79,8 +79,8 @@ func (m *ServerMap) Get(key string) string {
 	})
 	//检查心跳过期
 	for m.hashMap[m.keys[idx%len(m.keys)]].start.Add(m.timeout).Before(time.Now()) {
-		//todo:删除key
 		delete(m.hashMap, m.keys[idx%len(m.keys)])
+		m.keys = append(m.keys[idx%len(m.keys):], m.keys[idx%len(m.keys)+1:]...)
 		idx = sort.Search(len(m.keys), func(i int) bool {
 			return m.keys[i] >= hash
 		})
@@ -89,11 +89,24 @@ func (m *ServerMap) Get(key string) string {
 }
 
 func (m *ServerMap) Del(addr string) {
-	//todo:删除Key
+	for i := 0; i < m.replicas; i++ {
+		//通过序号+地址进行hash
+		hash := int(m.hash([]byte(strconv.Itoa(i) + addr)))
+		//m.keys = append(m.keys, hash)
+		idx := sort.Search(len(m.keys), func(i int) bool {
+			return m.keys[i] >= hash
+		})
+		m.keys = append(m.keys[:idx], m.keys[idx+1:]...)
+		delete(m.hashMap, hash)
+	}
 	delete(m.hashMap, int(m.hash([]byte(addr))))
 }
 
-func (m *ServerMap) heatBeat() error {
-	//todo：心跳
+func (m *ServerMap) heatBeat(addr string) error {
+	t := time.Now()
+	for i := 0; i < m.replicas; i++ {
+		hash := int(m.hash([]byte(strconv.Itoa(i) + addr)))
+		m.hashMap[hash].start = t
+	}
 	return nil
 }
