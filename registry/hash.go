@@ -79,6 +79,7 @@ func (m *ServerMap) Get(key string) string {
 	})
 	//检查心跳过期
 	for m.hashMap[m.keys[idx%len(m.keys)]].start.Add(m.timeout).Before(time.Now()) {
+		//todo:删除key
 		delete(m.hashMap, m.keys[idx%len(m.keys)])
 		idx = sort.Search(len(m.keys), func(i int) bool {
 			return m.keys[i] >= hash
@@ -88,6 +89,7 @@ func (m *ServerMap) Get(key string) string {
 }
 
 func (m *ServerMap) Del(addr string) {
+	//todo:删除Key
 	delete(m.hashMap, int(m.hash([]byte(addr))))
 }
 
