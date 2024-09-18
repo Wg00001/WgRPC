@@ -1,4 +1,4 @@
-package mapreduce
+package mr
 
 import (
 	"context"
@@ -11,9 +11,27 @@ type (
 		ctx     context.Context
 		workers int
 	}
-	// Option defines the method to customize the mapreduce.
+	// Option defines the method to customize the mr.
 	Option func(opts *mapReduceOptions)
 )
+
+// WithContext customizes a mapreduce processing accepts a given ctx.
+func WithContext(ctx context.Context) Option {
+	return func(opts *mapReduceOptions) {
+		opts.ctx = ctx
+	}
+}
+
+// WithWorkers customizes a mapreduce processing with given workers.
+func WithWorkers(workers int) Option {
+	return func(opts *mapReduceOptions) {
+		if workers < minWorkers {
+			opts.workers = minWorkers
+		} else {
+			opts.workers = workers
+		}
+	}
+}
 
 func newOptions() *mapReduceOptions {
 	return &mapReduceOptions{
@@ -27,7 +45,6 @@ func buildOptions(opts ...Option) *mapReduceOptions {
 	for _, opt := range opts {
 		opt(options)
 	}
-
 	return options
 }
 

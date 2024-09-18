@@ -1,4 +1,4 @@
-package mapreduce
+package mr
 
 import (
 	"context"
@@ -55,13 +55,67 @@ type (
 func NewMapReduce[T any, U any, V any](generate GenerateFunc[T], mapper MapperFunc[T, U], reducer ReducerFunc[U, V], opts ...Option) *MapReduce[T, U, V] {
 	options := buildOptions(opts...)
 	return &MapReduce[T, U, V]{
-		//ctx:      options.ctx,
-		//workers:  options.workers,
 		mapper:   mapper,
 		reducer:  reducer,
 		generate: generate,
 		options:  options,
 	}
+}
+
+func New[T any, U any, V any]() *MapReduce[T, U, V] {
+	return &MapReduce[T, U, V]{}
+}
+
+func (mr *MapReduce[T, U, V]) Copy() *MapReduce[T, U, V] {
+	// 创建新的 MapReduce 实例
+	return &MapReduce[T, U, V]{
+		generate: mr.generate,
+		mapper:   mr.mapper,
+		reducer:  mr.reducer,
+		options: &mapReduceOptions{
+			ctx:     mr.options.ctx,     // 复制上下文
+			workers: mr.options.workers, // 复制工作线程数
+		},
+	}
+}
+
+func (mr *MapReduce[T, U, V]) Generate(generate GenerateFunc[T]) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	mr.generate = generate
+	return mr
+}
+
+func (mr *MapReduce[T, U, V]) Mapper(mapper MapperFunc[T, U]) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	mr.mapper = mapper
+	return mr
+}
+
+func (mr *MapReduce[T, U, V]) Reducer(reducer ReducerFunc[U, V]) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	mr.reducer = reducer
+	return mr
+}
+
+func (mr *MapReduce[T, U, V]) Options(opts ...Option) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	mr.options = buildOptions(opts...)
+	return mr
+}
+
+func (mr *MapReduce[T, U, V]) WithWorkers(workers int) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	if workers < minWorkers {
+		workers = minWorkers
+	}
+	mr.options.workers = workers
+	return mr
+}
+
+func (mr *MapReduce[T, U, V]) WithContext(ctx context.Context) *MapReduce[T, U, V] {
+	mr = mr.Copy()
+	mr.options.ctx = ctx
+	return mr
 }
 
 func (mr *MapReduce[T, U, V]) Run() (V, error) {
@@ -177,17 +231,4 @@ func executeMappers[T, U any](mCtx mapperContext[T, U]) {
 			}()
 		}
 	}
-}
-
-func (mr *MapReduce[T, U, V]) WithWorkers(workers int) *MapReduce[T, U, V] {
-	if workers < minWorkers {
-		workers = minWorkers
-	}
-	mr.options.workers = workers
-	return mr
-}
-
-func (mr *MapReduce[T, U, V]) WithContext(ctx context.Context) *MapReduce[T, U, V] {
-	mr.options.ctx = ctx
-	return mr
 }
