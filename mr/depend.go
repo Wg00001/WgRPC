@@ -6,46 +6,32 @@ import (
 	"sync/atomic"
 )
 
-type (
-	mapReduceOptions struct {
-		ctx     context.Context
-		workers int
-	}
-	// Option defines the method to customize the mr.
-	Option func(opts *mapReduceOptions)
-)
-
-// WithContext customizes a mapreduce processing accepts a given ctx.
-func WithContext(ctx context.Context) Option {
-	return func(opts *mapReduceOptions) {
-		opts.ctx = ctx
-	}
+type Options struct {
+	ctx     context.Context
+	workers int
 }
 
-// WithWorkers customizes a mapreduce processing with given workers.
-func WithWorkers(workers int) Option {
-	return func(opts *mapReduceOptions) {
-		if workers < minWorkers {
-			opts.workers = minWorkers
-		} else {
-			opts.workers = workers
-		}
-	}
-}
-
-func newOptions() *mapReduceOptions {
-	return &mapReduceOptions{
+func NewOptions() *Options {
+	return &Options{
 		ctx:     context.Background(),
 		workers: defaultWorkers,
 	}
 }
 
-func buildOptions(opts ...Option) *mapReduceOptions {
-	options := newOptions()
-	for _, opt := range opts {
-		opt(options)
+// WithContext customizes a mapreduce processing accepts a given ctx.
+func (o *Options) WithContext(ctx context.Context) *Options {
+	return &Options{
+		ctx:     ctx,
+		workers: o.workers,
 	}
-	return options
+}
+
+// WithWorkers customizes a mapreduce processing with given workers.
+func (o *Options) WithWorkers(workers int) *Options {
+	return &Options{
+		ctx:     o.ctx,
+		workers: workers,
+	}
 }
 
 type onceChan struct {
