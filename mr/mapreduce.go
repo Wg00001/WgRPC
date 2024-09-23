@@ -39,11 +39,6 @@ type (
 		doneChan  <-chan struct{}
 		workers   int
 	}
-
-	// Writer interface wraps Write method.
-	Writer[T any] interface {
-		Write(v T)
-	}
 )
 
 type MapReduce[T any, U any, V any] struct {
@@ -243,7 +238,7 @@ func mapReduceWithPanicChan[T, U, V any](source <-chan T, panicChan *onceChan, m
 	return
 }
 
-// executeMappers 启动多个 goroutine 来并发地处理 source 中的元素，并将结果写入 collector。
+// executeMappers 启动多个 goroutine 来并发地处理 source 中的元素，并将结果写入 collector。根据worker自动限制mapper协程数
 func executeMappers[T, U any](mCtx mapperContext[T, U]) {
 	// 使用 WaitGroup 来等待所有 goroutine 完成
 	var wg sync.WaitGroup
@@ -263,6 +258,13 @@ func executeMappers[T, U any](mCtx mapperContext[T, U]) {
 
 	// 当 failed 为 0 时持续执行,使用标准库中的原子读
 	for atomic.LoadInt32(&failed) == 0 {
+		select {
+		case <-mCtx.ctx.Done(): // 上下文取消时返回
+			return
+		case <-mCtx.doneChan: // doneChan 被关闭时返回，表示需要终止处理
+			return
+		default:
+		}
 		select {
 		case <-mCtx.ctx.Done(): // 上下文取消时返回
 			return

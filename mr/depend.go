@@ -54,6 +54,11 @@ func once(fn func(error)) func(error) {
 	}
 }
 
+// Writer interface wraps Write method.
+type Writer[T any] interface {
+	Write(v T)
+}
+
 type guardedWriter[T any] struct {
 	ctx     context.Context
 	channel chan<- T
