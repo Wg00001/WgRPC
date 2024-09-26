@@ -1,4 +1,4 @@
-package mr
+package mapreduce
 
 import (
 	"context"
@@ -39,6 +39,10 @@ type (
 		doneChan  <-chan struct{}
 		workers   int
 	}
+
+	MR interface {
+		Run() (interface{}, error)
+	}
 )
 
 type MapReduce[T any, U any, V any] struct {
@@ -59,7 +63,7 @@ func NewMapReduce[T any, U any, V any](generate GenerateFunc[T], mapper MapperFu
 }
 
 func New[T any, U any, V any]() *MapReduce[T, U, V] {
-	return &MapReduce[T, U, V]{}
+	return &MapReduce[T, U, V]{options: Options{ctx: context.Background(), workers: defaultWorkers}}
 }
 
 func (mr *MapReduce[T, U, V]) Copy() *MapReduce[T, U, V] {
@@ -100,18 +104,24 @@ func (mr *MapReduce[T, U, V]) Options(opts Options) *MapReduce[T, U, V] {
 }
 
 func (mr *MapReduce[T, U, V]) WithWorkers(workers int) *MapReduce[T, U, V] {
-	mr.options.WithWorkers(workers)
+	mr.options.workers = workers
 	return mr
 }
 
 func (mr *MapReduce[T, U, V]) WithContext(ctx context.Context) *MapReduce[T, U, V] {
-	mr.options.WithContext(ctx)
+	mr.options.ctx = ctx
 	return mr
 }
 
 func (mr *MapReduce[T, U, V]) Run() (V, error) {
 	if mr.generate == nil || mr.mapper == nil || mr.reducer == nil {
 		return *new(V), fmt.Errorf("generate, mapper or reducer not set")
+	}
+	if mr.options.ctx == nil {
+		mr.options.ctx = context.Background()
+	}
+	if mr.options.workers < minWorkers {
+		mr.options.workers = minWorkers
 	}
 	panicChan := &onceChan{channel: make(chan any)}
 	source := buildSource(mr.generate, panicChan)

@@ -1,4 +1,4 @@
-package mr
+package mapreduce
 
 import (
 	"context"
@@ -28,6 +28,9 @@ func (o *Options) WithContext(ctx context.Context) *Options {
 
 // WithWorkers customizes a mapreduce processing with given workers.
 func (o *Options) WithWorkers(workers int) *Options {
+	if workers < minWorkers {
+		workers = minWorkers
+	}
 	return &Options{
 		ctx:     o.ctx,
 		workers: workers,
