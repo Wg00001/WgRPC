@@ -12,7 +12,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"reflect"
 	"sync"
 	"time"
 )
@@ -195,33 +194,46 @@ func main() {
 	defer func() {
 		fmt.Println("spend time : ", time.Now().Sub(st))
 	}()
-	b1 := b[int]{}
-	b2 := b[string]{}
-	c1 := c{Arr: []a{b1, b2}}
-	c1.print()
-}
-
-type a interface {
-	Print()
-}
-type b[T any] struct {
-	data T
-}
-
-func (receiver b[T]) Print() {
-	fmt.Println(reflect.TypeOf(receiver.data))
-}
-
-type c struct {
-	Arr []a
-}
-
-func (r c) print() {
-	for _, v := range r.Arr {
-		v.Print()
-	}
-}
-
-func Add[T any](cs c, bs b[T]) {
-	cs.Arr = append(cs.Arr, bs)
+	m1 := mapreduce.New[int, int, int]().
+		Generate(func(source chan<- int) {
+			for i := 0; i <= 100; i++ {
+				source <- i
+			}
+		}).
+		Mapper(func(item int, writer mapreduce.Writer[int], cancel func(error)) {
+			fmt.Println("mapper:", item)
+			time.Sleep(time.Second)
+			writer.Write(item)
+		}).
+		Reducer(func(pipe <-chan int, writer mapreduce.Writer[int], cancel func(error)) {
+			res := 0
+			for v := range pipe {
+				res += v
+				fmt.Println("reducer:", v)
+			}
+			writer.Write(res)
+		}).
+		WithWorkers(101)
+	m2 := mapreduce.New[int, int, int]().
+		Generate(func(source chan<- int) {
+			for i := 0; i <= 100; i++ {
+				source <- i
+			}
+		}).
+		Mapper(func(item int, writer mapreduce.Writer[int], cancel func(error)) {
+			fmt.Println("mapper:", item)
+			time.Sleep(time.Second)
+			writer.Write(item)
+		}).
+		Reducer(func(pipe <-chan int, writer mapreduce.Writer[int], cancel func(error)) {
+			res := 0
+			for v := range pipe {
+				res += v
+				fmt.Println("reducer:", v)
+			}
+			writer.Write(res)
+		}).
+		WithWorkers(101)
+	_ = m1
+	_ = m2
 }

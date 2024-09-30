@@ -39,10 +39,6 @@ type (
 		doneChan  <-chan struct{}
 		workers   int
 	}
-
-	MR interface {
-		Run() (interface{}, error)
-	}
 )
 
 type MapReduce[T any, U any, V any] struct {
