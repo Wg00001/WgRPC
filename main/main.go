@@ -2,8 +2,9 @@ package main
 
 import (
 	wgRPC "WgRPC"
-	"WgRPC/registry"
 	"WgRPC/loadBalancer"
+	"WgRPC/mapreduce"
+	"WgRPC/registry"
 	"bytes"
 	"context"
 	"encoding/gob"
@@ -194,10 +195,11 @@ func main() {
 	defer func() {
 		fmt.Println("spend time : ", time.Now().Sub(st))
 	}()
-	b1 := b[int]{}
-	b2 := b[string]{}
-	c1 := c{Arr: []a{b1, b2}}
-	c1.print()
+	//b1 := b[int]{}
+	//b2 := b[string]{}
+	//c1 := c{Arr: []a{b1, b2}}
+	//c1.print()
+	ExampleMrChain()
 }
 
 type a interface {
@@ -223,4 +225,49 @@ func (r c) print() {
 
 func Add[T any](cs c, bs b[T]) {
 	cs.Arr = append(cs.Arr, bs)
+}
+
+func ExampleMrChain() {
+	// 定义第一个MapReduce任务
+	mr1 := mapreduce.New[int, int, int]().
+		Generate(func(source chan<- int) {
+			for i := 0; i <= 100; i++ {
+				source <- i
+			}
+		}).
+		Mapper(func(item int, writer mapreduce.Writer[int], cancel func(error)) {
+			fmt.Println("mapper:", item)
+			writer.Write(item)
+		}).
+		Reducer(func(pipe <-chan int, writer mapreduce.Writer[int], cancel func(error)) {
+			res := 0
+			for v := range pipe {
+				res += v
+				fmt.Println("reducer:", v)
+			}
+			writer.Write(res)
+		}).
+		WithWorkers(5)
+
+	// 定义第二个MapReduce任务
+	mr2 := mapreduce.New[int, float64, float64]().
+		Mapper(
+			func(item int, writer mapreduce.Writer[float64], cancel func(error)) {
+				writer.Write(float64(item) / 2) // Mapper：除以2
+			}).
+		Reducer(
+			func(pipe <-chan float64, writer mapreduce.Writer[float64], cancel func(error)) {
+				for item := range pipe {
+					writer.Write(item) // Reducer：直接输出
+				}
+			}).
+		WithWorkers(5)
+
+	// 执行链式MapReduce任务
+	result, err := mapreduce.ChainRun(mr1, mr2)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Final Result:", result)
 }
