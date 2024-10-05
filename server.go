@@ -42,6 +42,8 @@ var DefaultOption = &Option{
 }
 
 type Server struct {
+
+	//todo:服务名
 	serviceMap sync.Map
 }
 
