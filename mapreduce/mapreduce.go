@@ -41,6 +41,11 @@ type (
 	}
 )
 
+type MapReduceItf interface {
+	Run() (any, error)
+	setGenerate(generateFunc interface{}) error // 假设生成器的类型可以是通用的
+}
+
 type MapReduce[T any, U any, V any] struct {
 	mapper   MapperFunc[T, U]
 	reducer  ReducerFunc[U, V]
@@ -81,6 +86,15 @@ func (mr *MapReduce[T, U, V]) Generate(generate GenerateFunc[T]) *MapReduce[T, U
 	return nx
 }
 
+func (mr *MapReduce[T, U, V]) setGenerate(generateFunc interface{}) error {
+	// 进行类型断言，确保 generateFunc 是 GenerateFunc[T] 类型
+	if gen, ok := generateFunc.(GenerateFunc[T]); ok {
+		mr.generate = gen
+		return nil
+	}
+	return fmt.Errorf("invalid generate function type: expected GenerateFunc[%T]", new(T))
+}
+
 func (mr *MapReduce[T, U, V]) Mapper(mapper MapperFunc[T, U]) *MapReduce[T, U, V] {
 	nx := mr.Copy()
 	nx.mapper = mapper
@@ -107,6 +121,51 @@ func (mr *MapReduce[T, U, V]) WithWorkers(workers int) *MapReduce[T, U, V] {
 func (mr *MapReduce[T, U, V]) WithContext(ctx context.Context) *MapReduce[T, U, V] {
 	mr.options.ctx = ctx
 	return mr
+}
+
+func ChainRun(chain ...interface{}) (any, error) {
+	var finalResult any
+	var err error
+
+	for i := 0; i < len(chain); i++ {
+		//todo:err
+		mr, ok := chain[i].(MapReduceItf)
+		if ok {
+			return nil, errors.New("invalid MapReduce type")
+		}
+		// 如果是第一个MapReduce，则正常执行generate
+		if i == 0 {
+			finalResult, err = mr.Run()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// 否则，使用上一个MapReduce的结果作为下一个的generate
+			previousResult := finalResult
+
+			// 创建新的generate函数，并传递前一个结果作为输入
+			nextGenerate := func(source chan<- any) {
+				// 将前一个reducer的结果作为当前generate的输入
+				source <- previousResult
+				close(source)
+			}
+
+			// 使用SetGenerate方法将下一个MapReduce任务的generate设置为nextGenerate
+			err = mr.setGenerate(nextGenerate)
+			if err != nil {
+				return nil, err
+			}
+
+			// 执行当前的MapReduce
+			finalResult, err = mr.Run()
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// 返回最终结果
+	return finalResult, nil
 }
 
 func (mr *MapReduce[T, U, V]) Run() (V, error) {

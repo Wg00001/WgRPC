@@ -2,9 +2,9 @@ package main
 
 import (
 	wgRPC "WgRPC"
+	"WgRPC/loadBalancer"
 	"WgRPC/mapreduce"
 	"WgRPC/registry"
-	"WgRPC/xclient"
 	"bytes"
 	"context"
 	"encoding/gob"
@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -29,14 +30,14 @@ func (f Foo) Sub(args Args, reply *int) error {
 	*reply = args.Num1 - args.Num2
 	return nil
 }
-func foo(xc *xclient.XClient, ctx context.Context, typ, serviceMethod string, args *Args) {
+func foo(xc *loadBalancer.XClient, ctx context.Context, typ, serviceMethod string, args *Args) {
 	var reply int
 	var err error
 	switch typ {
 	case "call":
-		err = xc.Call(serviceMethod, args, &reply, ctx)
+		err = xc.Call(ctx, serviceMethod, args, &reply)
 	case "broadcast":
-		err = xc.Broadcast(serviceMethod, args, &reply, ctx)
+		err = xc.Broadcast(ctx, serviceMethod, args, &reply)
 	}
 	if err != nil {
 		log.Printf("%s %s error: %v", typ, serviceMethod, err)
@@ -64,8 +65,8 @@ func startServer(registryAddr string, wg *sync.WaitGroup) {
 	server.Accept(l)
 }
 func call(registry string) {
-	d := xclient.NewWgRegistryDiscovery(registry, 0)
-	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
+	d := loadBalancer.NewWgRegistryDiscovery(registry, 0)
+	xc := loadBalancer.NewXClient(d, loadBalancer.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	// send request & receive response
 	var wg sync.WaitGroup
@@ -80,8 +81,8 @@ func call(registry string) {
 }
 
 func broadcast(registry string) {
-	d := xclient.NewWgRegistryDiscovery(registry, 0)
-	xc := xclient.NewXClient(d, xclient.RandomSelect, nil)
+	d := loadBalancer.NewWgRegistryDiscovery(registry, 0)
+	xc := loadBalancer.NewXClient(d, loadBalancer.RandomSelect, nil)
 	defer func() { _ = xc.Close() }()
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
@@ -194,7 +195,41 @@ func main() {
 	defer func() {
 		fmt.Println("spend time : ", time.Now().Sub(st))
 	}()
-	m1 := mapreduce.New[int, int, int]().
+	//b1 := b[int]{}
+	//b2 := b[string]{}
+	//c1 := c{Arr: []a{b1, b2}}
+	//c1.print()
+	ExampleMrChain()
+}
+
+type a interface {
+	Print()
+}
+type b[T any] struct {
+	data T
+}
+
+func (receiver b[T]) Print() {
+	fmt.Println(reflect.TypeOf(receiver.data))
+}
+
+type c struct {
+	Arr []a
+}
+
+func (r c) print() {
+	for _, v := range r.Arr {
+		v.Print()
+	}
+}
+
+func Add[T any](cs c, bs b[T]) {
+	cs.Arr = append(cs.Arr, bs)
+}
+
+func ExampleMrChain() {
+	// 定义第一个MapReduce任务
+	mr1 := mapreduce.New[int, int, int]().
 		Generate(func(source chan<- int) {
 			for i := 0; i <= 100; i++ {
 				source <- i
@@ -202,7 +237,6 @@ func main() {
 		}).
 		Mapper(func(item int, writer mapreduce.Writer[int], cancel func(error)) {
 			fmt.Println("mapper:", item)
-			time.Sleep(time.Second)
 			writer.Write(item)
 		}).
 		Reducer(func(pipe <-chan int, writer mapreduce.Writer[int], cancel func(error)) {
@@ -213,27 +247,27 @@ func main() {
 			}
 			writer.Write(res)
 		}).
-		WithWorkers(101)
-	m2 := mapreduce.New[int, int, int]().
-		Generate(func(source chan<- int) {
-			for i := 0; i <= 100; i++ {
-				source <- i
-			}
-		}).
-		Mapper(func(item int, writer mapreduce.Writer[int], cancel func(error)) {
-			fmt.Println("mapper:", item)
-			time.Sleep(time.Second)
-			writer.Write(item)
-		}).
-		Reducer(func(pipe <-chan int, writer mapreduce.Writer[int], cancel func(error)) {
-			res := 0
-			for v := range pipe {
-				res += v
-				fmt.Println("reducer:", v)
-			}
-			writer.Write(res)
-		}).
-		WithWorkers(101)
-	_ = m1
-	_ = m2
+		WithWorkers(5)
+
+	// 定义第二个MapReduce任务
+	mr2 := mapreduce.New[int, float64, float64]().
+		Mapper(
+			func(item int, writer mapreduce.Writer[float64], cancel func(error)) {
+				writer.Write(float64(item) / 2) // Mapper：除以2
+			}).
+		Reducer(
+			func(pipe <-chan float64, writer mapreduce.Writer[float64], cancel func(error)) {
+				for item := range pipe {
+					writer.Write(item) // Reducer：直接输出
+				}
+			}).
+		WithWorkers(5)
+
+	// 执行链式MapReduce任务
+	result, err := mapreduce.ChainRun(mr1, mr2)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Final Result:", result)
 }
